@@ -10,42 +10,56 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Logger;
 
-@Service // Marks this class as a Spring Service component
+@Service
 public class UserService {
 
     private static final Logger logger = Logger.getLogger(UserService.class.getName());
 
-    @Autowired // Automatically injects an instance of UserRepository
+    @Autowired
     private UserRepository userRepository;
 
-    @Transactional // Ensures the entire method executes within a single database transaction
-    public User createUser(String name, String email) {
-        // Attempt to find an existing user by name
+    @Transactional
+    public User createUser(String name) { // MODIFIED: Removed email parameter
         Optional<User> existingUser = userRepository.findByName(name);
         if (existingUser.isPresent()) {
-            User user = existingUser.get();
-            // If user exists, check if email needs updating
-            if (email != null && !email.isEmpty() && !email.equals(user.getEmail())) {
-                logger.info("Updating email for existing user: " + name + " from " + user.getEmail() + " to " + email);
-                user.setEmail(email);
-                return userRepository.save(user); // Save to update the email in the database
-            }
-            logger.info("User already exists: " + name + ". No email update needed.");
-            return user; // Return the existing user if no email update is required
+            logger.info("User already exists: " + name + ". Returning existing user.");
+            return existingUser.get();
         }
-
         User newUser = new User();
         newUser.setName(name);
-        newUser.setEmail(email);
-        logger.info("Creating new user: " + name + " with email: " + email);
-        return userRepository.save(newUser); // Save the new user to the database
+        // newUser.setEmail(null); // Email is not set at creation
+        logger.info("Creating new user: " + name);
+        return userRepository.save(newUser);
+    }
+
+    /**
+     * NEW METHOD: Updates the email address for an existing user.
+     * @param userId The ID of the user to update.
+     * @param newEmail The new email address to set.
+     * @return An Optional containing the updated User entity if found, or empty if user not found.
+     */
+    @Transactional
+    public Optional<User> updateUserEmail(UUID userId, String newEmail) {
+        Optional<User> userOptional = userRepository.findById(userId);
+        if (userOptional.isPresent()) {
+            User user = userOptional.get();
+            if (newEmail != null && !newEmail.isBlank() && !newEmail.equals(user.getEmail())) {
+                user.setEmail(newEmail);
+                logger.info("Updating email for user " + userId + " to: " + newEmail);
+                return Optional.of(userRepository.save(user));
+            }
+            logger.info("Email for user " + userId + " is already " + user.getEmail() + " or new email is invalid/blank. No update performed.");
+            return userOptional; // Return existing user if no update needed
+        }
+        logger.warning("Attempted to update email for non-existent user: " + userId);
+        return Optional.empty();
     }
 
     public Optional<User> getUserById(UUID id) {
-        return userRepository.findById(id); // Uses Spring Data JPA's built-in findById method
+        return userRepository.findById(id);
     }
 
     public Optional<User> getUserByName(String name) {
-        return userRepository.findByName(name); // Uses the custom query method defined in UserRepository
+        return userRepository.findByName(name);
     }
 }

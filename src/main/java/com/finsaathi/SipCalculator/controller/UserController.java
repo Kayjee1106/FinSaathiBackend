@@ -12,7 +12,7 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 @RestController
-@RequestMapping("/api/users") // Base path for user-related endpoints
+@RequestMapping("/api/users")
 public class UserController {
 
     private static final Logger logger = Logger.getLogger(UserController.class.getName());
@@ -23,22 +23,18 @@ public class UserController {
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> registerUser(@RequestBody Map<String, String> payload) {
         String name = payload.get("name");
-        String email = payload.get("email");
+        // REMOVED: String email = payload.get("email");
 
         if (name == null || name.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "User name cannot be empty."));
         }
-        if (email == null || email.isBlank() || !email.contains("@") || !email.contains(".")) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Valid email address is required."));
-        }
 
-        User user = userService.createUser(name, email);
-        logger.info("User registered/retrieved: " + user.getName() + " with ID: " + user.getId() + ", Email: " + user.getEmail());
+        User user = userService.createUser(name); // MODIFIED: Removed email parameter
+        logger.info("User registered/retrieved: " + user.getName() + " with ID: " + user.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "message", "User created or retrieved successfully",
                 "userId", user.getId().toString(),
-                "userName", user.getName(),
-                "userEmail", user.getEmail()
+                "userName", user.getName()
         ));
     }
 
@@ -49,7 +45,7 @@ public class UserController {
                 .map(user -> ResponseEntity.ok(Map.of(
                         "userId", user.getId().toString(),
                         "userName", user.getName(),
-                        "userEmail", user.getEmail() != null ? user.getEmail() : ""
+                        "userEmail", user.getEmail() != null ? user.getEmail() : "" // Email is optional here
                 )))
                 .orElse(ResponseEntity.notFound().build());
     }

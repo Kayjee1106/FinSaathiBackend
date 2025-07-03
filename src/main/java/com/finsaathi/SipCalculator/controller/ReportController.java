@@ -23,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/reports") // Base path for report-related endpoints
 public class ReportController {
+
     private static final Logger logger = Logger.getLogger(ReportController.class.getName());
 
     @Autowired
@@ -46,29 +47,23 @@ public class ReportController {
     public ResponseEntity<byte[]> getPdfReport(@PathVariable UUID requestId) {
         logger.info("Received request to generate PDF for request ID: " + requestId);
 
-        // Fetch UserRequest
         Optional<UserRequest> userRequestOptional = userRequestService.getUserRequestById(requestId);
         if (userRequestOptional.isEmpty()) {
             logger.warning("PDF report requested for non-existent request ID: " + requestId);
-            // FIX APPLIED HERE: Removed .build()
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
         UserRequest userRequest = userRequestOptional.get();
 
-        // Fetch GoalCalculation associated with the request
         Optional<GoalCalculation> goalCalculationOptional = userRequestService.getGoalCalculationByRequestId(requestId);
         if (goalCalculationOptional.isEmpty()) {
             logger.severe("No calculation found for user request ID: " + requestId + ". Cannot generate PDF.");
-            // FIX APPLIED HERE: Removed .build()
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
         GoalCalculation goalCalculation = goalCalculationOptional.get();
 
-        // Fetch User details
         Optional<User> userOptional = userService.getUserById(userRequest.getUserId());
         if (userOptional.isEmpty()) {
             logger.severe("User not found for user request " + requestId + " (userId: " + userRequest.getUserId() + "). This is an unexpected state.");
-            // FIX APPLIED HERE: Removed .build()
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
         User user = userOptional.get();
@@ -81,7 +76,6 @@ public class ReportController {
             overallOptimalMonthlySip = userRequest.getFutureValue();
         } else {
             logger.warning("GoalCalculation found for request ID " + requestId + " but no valid overall optimal monthly SIP could be determined for PDF allocation.");
-            // FIX APPLIED HERE: Removed .build()
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
         }
 
@@ -99,16 +93,15 @@ public class ReportController {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_PDF);
             String filename = "SIP_Report_" + user.getName().replaceAll("\\s+", "_") + "_Request_" + requestId.toString().substring(0, 8) + ".pdf";
-            headers.setContentDispositionFormData("attachment", filename); // Forces browser to download the file
-            headers.setCacheControl("must-revalidate, post-check=0, pre-check=0"); // Cache control headers
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setCacheControl("must-revalidate, post-check=0, pre-check=0");
 
             logger.info("Generated PDF report successfully for request ID: " + requestId);
-            return ResponseEntity.ok() // 200 OK
+            return ResponseEntity.ok()
                     .headers(headers)
                     .body(pdfBytes);
         } catch (IOException e) {
             logger.severe("Error generating PDF report for request ID " + requestId + ": " + e.getMessage());
-            // FIX APPLIED HERE: Removed .build()
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
@@ -117,15 +110,23 @@ public class ReportController {
      * Generates a PDF report and emails it to the user associated with the request.
      * Maps to POST /api/reports/email/{requestId}
      * @param requestId The ID of the user request (Transaction ID).
-     * @param payload A map that may contain an "email" field.
+     * @param payload A map that MUST contain an "email" field.
      * @return ResponseEntity with success/failure message.
      */
     @PostMapping("/email/{requestId}")
     public ResponseEntity<Map<String, String>> emailPdfReport(@PathVariable UUID requestId,
-                                                              @RequestBody(required = false) Map<String, String> payload) {
+                                                              @RequestBody Map<String, String> payload) {
         logger.info("Received request to email PDF for request ID: " + requestId);
 
-        // Fetch UserRequest
+        // Validate email from payload immediately
+        String recipientEmail = payload.get("email");
+        if (recipientEmail == null || recipientEmail.isBlank() || !recipientEmail.contains("@") || !recipientEmail.contains(".")) {
+            logger.warning("Invalid email address provided in request body for request ID: " + requestId);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "A valid email address must be provided in the request body."));
+        }
+        logger.info("Recipient email from request body: " + recipientEmail);
+
+
         Optional<UserRequest> userRequestOptional = userRequestService.getUserRequestById(requestId);
         if (userRequestOptional.isEmpty()) {
             logger.warning("Email report requested for non-existent request ID: " + requestId);
@@ -133,7 +134,6 @@ public class ReportController {
         }
         UserRequest userRequest = userRequestOptional.get();
 
-        // Fetch GoalCalculation
         Optional<GoalCalculation> goalCalculationOptional = userRequestService.getGoalCalculationByRequestId(requestId);
         if (goalCalculationOptional.isEmpty()) {
             logger.severe("No calculation found for user request ID: " + requestId + ". Cannot email PDF.");
@@ -141,7 +141,6 @@ public class ReportController {
         }
         GoalCalculation goalCalculation = goalCalculationOptional.get();
 
-        // Fetch User details (crucially, the email)
         Optional<User> userOptional = userService.getUserById(userRequest.getUserId());
         if (userOptional.isEmpty()) {
             logger.severe("User not found for user request " + requestId + " (userId: " + userRequest.getUserId() + "). Cannot email PDF.");
@@ -149,20 +148,12 @@ public class ReportController {
         }
         User user = userOptional.get();
 
-        // Validate user email
-        String recipientEmail = null;
-        if (payload != null && payload.containsKey("email")) {
-            recipientEmail = payload.get("email");
-            logger.info("Using email from request body: " + recipientEmail);
-        } else if (user.getEmail() != null && !user.getEmail().isBlank()) {
-            recipientEmail = user.getEmail();
-            logger.info("Using email from user's stored profile: " + recipientEmail);
+        // --- NEW LOGIC: Save the provided email to the user's profile ---
+        if (!recipientEmail.equals(user.getEmail())) { // Only update if different
+            userService.updateUserEmail(user.getId(), recipientEmail);
+            logger.info("Updated user " + user.getId() + " email to: " + recipientEmail);
         }
-
-        if (recipientEmail == null || recipientEmail.isBlank() || !recipientEmail.contains("@") || !recipientEmail.contains(".")) {
-            logger.warning("No valid email address provided in request body or stored for user " + user.getId() + " to send PDF.");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "A valid email address is required to send the report."));
-        }
+        // --- END NEW LOGIC ---
 
         // Determine the overall optimal monthly SIP needed for the allocation breakdown in the PDF email
         BigDecimal overallOptimalMonthlySip;
@@ -175,7 +166,6 @@ public class ReportController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Could not determine target monthly SIP for email allocation."));
         }
 
-        // Fetch the 50-30-20 allocated scheme suggestions for the PDF email
         List<SchemeSipSuggestion> allocatedSuggestions = investmentSchemeService.getOptimalAllocatedSchemeSuggestions(
                 overallOptimalMonthlySip,
                 userRequest.getTimePeriodYears()
@@ -201,3 +191,9 @@ public class ReportController {
         }
     }
 }
+
+
+
+
+
+

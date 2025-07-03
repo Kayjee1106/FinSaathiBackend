@@ -29,10 +29,11 @@ public class UserRequestController {
     @Autowired
     private InvestmentSchemeService investmentSchemeService;
 
+    /** Primary flow: Creates a new user request for a goal calculation (SIP from FV). */
     @PostMapping("/calculate-and-save")
     public ResponseEntity<?> createAndSaveUserRequest(
             @RequestParam UUID userId,
-            @RequestParam BigDecimal futureValue,
+            @RequestParam BigDecimal futureValue, // This is the target FV
             @RequestParam Integer timePeriodYears,
             @RequestParam String dreamType) {
 
@@ -68,15 +69,28 @@ public class UserRequestController {
         }
     }
 
-    /** What-if flow: Calculates Future Value from a user-provided Monthly SIP amount. */
+    /**
+     * Calculates Future Value from a user-provided Monthly SIP amount.
+     * This is for the "what-if" scenario where user provides a Monthly SIP and gets FV.
+     * It now also accepts the user's original target future value for comparison in PDF.
+     * Maps to POST /api/requests/calculate-fv-from-sip
+     * @param userId The ID of the user.
+     * @param monthlySipAmount The monthly SIP amount provided by the user.
+     * @param timePeriodYears The time period in years.
+     * @param dreamType An optional dream type for this what-if scenario.
+     * @param originalTargetFutureValue The user's original target future value (can be null if not applicable). NEW PARAM
+     * @return ResponseEntity with the new UserRequest and its associated GoalCalculation containing FV.
+     */
     @PostMapping("/calculate-fv-from-sip")
     public ResponseEntity<?> calculateFvFromUserSip(
             @RequestParam UUID userId,
             @RequestParam BigDecimal monthlySipAmount,
             @RequestParam Integer timePeriodYears,
-            @RequestParam(required = false) String dreamType) {
+            @RequestParam(required = false) String dreamType,
+            @RequestParam(required = false) BigDecimal originalTargetFutureValue) { // NEW PARAM
 
-        logger.info("Received request to calculate FV from SIP for user: " + userId + ", SIP: " + monthlySipAmount + ", Years: " + timePeriodYears);
+        logger.info("Received request to calculate FV from SIP for user: " + userId + ", SIP: " + monthlySipAmount + ", Years: " + timePeriodYears + ", Original Target FV: " + originalTargetFutureValue);
+
         if (monthlySipAmount == null || monthlySipAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "Monthly SIP amount must be a positive number."));
         }
@@ -85,7 +99,7 @@ public class UserRequestController {
         }
 
         try {
-            UserRequest savedUserRequest = userRequestService.createFutureValueCalculationForUserSip(userId, monthlySipAmount, timePeriodYears, dreamType);
+            UserRequest savedUserRequest = userRequestService.createFutureValueCalculationForUserSip(userId, monthlySipAmount, timePeriodYears, dreamType, originalTargetFutureValue); // MODIFIED: Pass originalTargetFutureValue
             Optional<GoalCalculation> goalCalculation = userRequestService.getGoalCalculationByRequestId(savedUserRequest.getId());
 
             if (goalCalculation.isPresent()) {
@@ -105,6 +119,7 @@ public class UserRequestController {
         }
     }
 
+    /** Retrieves all user requests (transactions) for a specific user. */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<UserRequest>> getUserRequestsByUserId(@PathVariable UUID userId) {
         logger.info("Received request to get all user requests for user ID: " + userId);
@@ -112,6 +127,7 @@ public class UserRequestController {
         return ResponseEntity.ok(userRequests);
     }
 
+    /** Retrieves details of a specific user request (transaction) and its associated calculation results. */
     @GetMapping("/{requestId}")
     public ResponseEntity<?> getUserRequestDetails(@PathVariable UUID requestId) {
         logger.info("Received request to get details for request ID: " + requestId);
@@ -133,6 +149,7 @@ public class UserRequestController {
         return ResponseEntity.ok(response);
     }
 
+    /** Retrieves detailed scheme suggestions for a specific user request. */
     @GetMapping("/{requestId}/scheme-suggestions")
     public ResponseEntity<?> getSchemeSuggestionsForRequest(@PathVariable UUID requestId) {
         logger.info("Received request to get scheme suggestions for request ID: " + requestId);
@@ -151,21 +168,21 @@ public class UserRequestController {
         }
         GoalCalculation goalCalculation = goalCalculationOptional.get();
 
-        // Determine the overall optimal monthly SIP needed for the allocation breakdown
         BigDecimal overallOptimalMonthlySip;
         if (goalCalculation.getMonthlySipRequiredBestWeightedCase() != null) {
             overallOptimalMonthlySip = goalCalculation.getMonthlySipRequiredBestWeightedCase();
+        } else if (userRequest.getFutureValue() != null) {
+            overallOptimalMonthlySip = userRequest.getFutureValue();
         } else {
-            // If the request was a "what-if" (FV from SIP), there's no "monthly_sip_required_best_weighted_case"
-            // We need to use the monthly SIP that the user provided in their request.
-            overallOptimalMonthlySip = userRequest.getFutureValue(); // userRequest.future_value stores the monthly SIP for this type of request
+            logger.warning("GoalCalculation found for request ID " + requestId + " but no valid overall optimal monthly SIP could be determined for PDF allocation.");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "Could not determine target monthly SIP for allocation."));
         }
 
-        List<SchemeSipSuggestion> suggestions = investmentSchemeService.getOptimalAllocatedSchemeSuggestions(
+        List<SchemeSipSuggestion> allocatedSuggestions = investmentSchemeService.getOptimalAllocatedSchemeSuggestions(
                 overallOptimalMonthlySip,
                 userRequest.getTimePeriodYears()
         );
 
-        return ResponseEntity.ok(suggestions);
+        return ResponseEntity.ok(allocatedSuggestions);
     }
 }
