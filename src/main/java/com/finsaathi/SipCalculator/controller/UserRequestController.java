@@ -1,14 +1,20 @@
 package com.finsaathi.SipCalculator.controller;
 
-import com.finsaathi.SipCalculator.model.GoalCalculation;
-import com.finsaathi.SipCalculator.model.SchemeSipSuggestion;
-import com.finsaathi.SipCalculator.model.UserRequest;
+import com.finsaathi.SipCalculator.model.*;
 import com.finsaathi.SipCalculator.service.InvestmentSchemeService;
 import com.finsaathi.SipCalculator.service.UserRequestService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.logging.Logger;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -31,13 +37,17 @@ public class UserRequestController {
 
     /** Primary flow: Creates a new user request for a goal calculation (SIP from FV). */
     @PostMapping("/calculate-and-save")
-    public ResponseEntity<?> createAndSaveUserRequest(
-            @RequestParam UUID userId,
-            @RequestParam BigDecimal futureValue, // This is the target FV
-            @RequestParam Integer timePeriodYears,
-            @RequestParam String dreamType) {
+    public ResponseEntity<?> createAndSaveUserRequest(@RequestBody CalculateAndSaveRequest request) {
+        logger.info("Received request to create and save user request (SIP from FV): " + request.toString());
 
-        logger.info("Received request to create and save user request (SIP from FV) for user: " + userId);
+        UUID userId = request.getUserId();
+        BigDecimal futureValue = request.getFutureValue();
+        Integer timePeriodYears = request.getTimePeriodYears();
+        String dreamType = request.getDreamType();
+
+        if (userId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User ID cannot be empty."));
+        }
         if (futureValue == null || futureValue.compareTo(BigDecimal.ZERO) <= 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "Future value must be a positive number."));
         }
@@ -49,7 +59,8 @@ public class UserRequestController {
         }
 
         try {
-            UserRequest savedUserRequest = userRequestService.createNewUserRequestAndCalculateSip(userId, futureValue, timePeriodYears, dreamType);
+            // Service method now accepts the DTO directly
+            UserRequest savedUserRequest = userRequestService.createNewUserRequestAndCalculateSip(request);
             Optional<GoalCalculation> goalCalculation = userRequestService.getGoalCalculationByRequestId(savedUserRequest.getId());
 
             if (goalCalculation.isPresent()) {
@@ -71,26 +82,25 @@ public class UserRequestController {
 
     /**
      * Calculates Future Value from a user-provided Monthly SIP amount.
-     * This is for the "what-if" scenario where user provides a Monthly SIP and gets FV.
-     * It now also accepts the user's original target future value for comparison in PDF.
+     * Now accepts input as a JSON request body.
      * Maps to POST /api/requests/calculate-fv-from-sip
-     * @param userId The ID of the user.
-     * @param monthlySipAmount The monthly SIP amount provided by the user.
-     * @param timePeriodYears The time period in years.
-     * @param dreamType An optional dream type for this what-if scenario.
-     * @param originalTargetFutureValue The user's original target future value (can be null if not applicable). NEW PARAM
+     * @param request The CalculateFvFromSipRequest DTO containing all input parameters.
      * @return ResponseEntity with the new UserRequest and its associated GoalCalculation containing FV.
      */
     @PostMapping("/calculate-fv-from-sip")
-    public ResponseEntity<?> calculateFvFromUserSip(
-            @RequestParam UUID userId,
-            @RequestParam BigDecimal monthlySipAmount,
-            @RequestParam Integer timePeriodYears,
-            @RequestParam(required = false) String dreamType,
-            @RequestParam(required = false) BigDecimal originalTargetFutureValue) { // NEW PARAM
+    public ResponseEntity<?> calculateFvFromUserSip(@RequestBody CalculateFvFromSipRequest request) { // Accepts DTO directly
+        logger.info("Received request to calculate FV from SIP: " + request.toString());
 
-        logger.info("Received request to calculate FV from SIP for user: " + userId + ", SIP: " + monthlySipAmount + ", Years: " + timePeriodYears + ", Original Target FV: " + originalTargetFutureValue);
+        // Extract fields from DTO for validation
+        UUID userId = request.getUserId();
+        BigDecimal monthlySipAmount = request.getMonthlySipAmount();
+        Integer timePeriodYears = request.getTimePeriodYears();
+        // dreamType and originalTargetFutureValue are optional and can be null
 
+        // Basic input validation
+        if (userId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User ID cannot be empty."));
+        }
         if (monthlySipAmount == null || monthlySipAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "Monthly SIP amount must be a positive number."));
         }
@@ -99,7 +109,8 @@ public class UserRequestController {
         }
 
         try {
-            UserRequest savedUserRequest = userRequestService.createFutureValueCalculationForUserSip(userId, monthlySipAmount, timePeriodYears, dreamType, originalTargetFutureValue); // MODIFIED: Pass originalTargetFutureValue
+            // FIX APPLIED HERE: Pass the whole request DTO to the service method
+            UserRequest savedUserRequest = userRequestService.createFutureValueCalculationForUserSip(request);
             Optional<GoalCalculation> goalCalculation = userRequestService.getGoalCalculationByRequestId(savedUserRequest.getId());
 
             if (goalCalculation.isPresent()) {
@@ -174,15 +185,15 @@ public class UserRequestController {
         } else if (userRequest.getFutureValue() != null) {
             overallOptimalMonthlySip = userRequest.getFutureValue();
         } else {
-            logger.warning("GoalCalculation found for request ID " + requestId + " but no valid overall optimal monthly SIP could be determined for PDF allocation.");
+            logger.warning("GoalCalculation found for request ID " + requestId + " but no valid overall optimal monthly SIP could be determined for allocation.");
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "Could not determine target monthly SIP for allocation."));
         }
 
-        List<SchemeSipSuggestion> allocatedSuggestions = investmentSchemeService.getOptimalAllocatedSchemeSuggestions(
+        List<SchemeSipSuggestion> suggestions = investmentSchemeService.getOptimalAllocatedSchemeSuggestions(
                 overallOptimalMonthlySip,
                 userRequest.getTimePeriodYears()
         );
 
-        return ResponseEntity.ok(allocatedSuggestions);
+        return ResponseEntity.ok(suggestions);
     }
 }

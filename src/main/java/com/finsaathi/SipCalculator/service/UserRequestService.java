@@ -2,9 +2,7 @@ package com.finsaathi.SipCalculator.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.finsaathi.SipCalculator.model.GoalCalculation;
-import com.finsaathi.SipCalculator.model.LambdaSipResponse;
-import com.finsaathi.SipCalculator.model.UserRequest;
+import com.finsaathi.SipCalculator.model.*;
 import com.finsaathi.SipCalculator.repository.GoalCalculationRepository;
 import com.finsaathi.SipCalculator.repository.UserRequestRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,25 +35,22 @@ public class UserRequestService {
 
     /**
      * Creates and saves a new user request for a goal calculation (SIP from FV).
-     * This is for the primary flow where user provides a Future Value goal and wants to find the Monthly SIP.
-     * @param userId The ID of the user creating the request.
-     * @param futureValue The target future value (goal amount).
-     * @param timePeriodYears The investment time period in years.
-     * @param dreamType The type of dream/goal.
+     * This is the primary flow where user provides a Future Value goal and wants to find the Monthly SIP.
+     * @param requestDto The DTO containing all input parameters.
      * @return The newly created UserRequest object.
      */
     @Transactional
-    public UserRequest createNewUserRequestAndCalculateSip(UUID userId, BigDecimal futureValue, Integer timePeriodYears, String dreamType) {
+    public UserRequest createNewUserRequestAndCalculateSip(CalculateAndSaveRequest requestDto) {
         UserRequest userRequest = new UserRequest();
-        userRequest.setUserId(userId);
-        userRequest.setFutureValue(futureValue); // Here, future_value is the TARGET
-        userRequest.setTimePeriodYears(timePeriodYears);
-        userRequest.setDreamType(dreamType);
-        userRequest.setOriginalTargetFutureValue(futureValue); // NEW: For this flow, original target is the futureValue
+        userRequest.setUserId(requestDto.getUserId());
+        userRequest.setFutureValue(requestDto.getFutureValue()); // CORRECT: futureValue is the goal here
+        userRequest.setTimePeriodYears(requestDto.getTimePeriodYears());
+        userRequest.setDreamType(requestDto.getDreamType());
+        userRequest.setOriginalTargetFutureValue(requestDto.getFutureValue()); // CORRECT: Original target is the futureValue for this flow
         userRequest = userRequestRepository.save(userRequest);
 
         LambdaSipResponse sipResponse = getOrCreateSipCalculationFromUserRequests(
-                "calculate_sip_from_fv", futureValue, timePeriodYears, null);
+                "calculate_sip_from_fv", requestDto.getFutureValue(), requestDto.getTimePeriodYears(), null);
 
         GoalCalculation goalCalculation = new GoalCalculation();
         goalCalculation.setRequestId(userRequest.getId());
@@ -68,26 +63,22 @@ public class UserRequestService {
     /**
      * Creates and saves a new user request for a Future Value calculation from a custom Monthly SIP.
      * This is for the "what-if" scenario where user provides a Monthly SIP and gets FV.
-     * It now also stores the user's original target future value in the UserRequest.
-     * @param userId The ID of the user.
-     * @param monthlySipAmount The monthly SIP amount provided by the user.
-     * @param timePeriodYears The time period in years.
-     * @param dreamType The type of dream/goal.
-     * @param originalTargetFutureValue The user's original target future value (from a previous step).
+     * It now correctly stores the user's original target future value and the monthly SIP.
+     * @param requestDto The DTO containing all input parameters.
      * @return The newly created UserRequest object.
      */
     @Transactional
-    public UserRequest createFutureValueCalculationForUserSip(UUID userId, BigDecimal monthlySipAmount, Integer timePeriodYears, String dreamType, BigDecimal originalTargetFutureValue) {
+    public UserRequest createFutureValueCalculationForUserSip(CalculateFvFromSipRequest requestDto) {
         UserRequest userRequest = new UserRequest();
-        userRequest.setUserId(userId);
-        userRequest.setFutureValue(monthlySipAmount); // For this operation type, store monthly SIP in future_value
-        userRequest.setTimePeriodYears(timePeriodYears);
-        userRequest.setDreamType(dreamType != null ? dreamType : "Custom SIP What-If");
-        userRequest.setOriginalTargetFutureValue(originalTargetFutureValue); // NEW: Store the original target FV
+        userRequest.setUserId(requestDto.getUserId());
+        userRequest.setFutureValue(requestDto.getMonthlySipAmount()); // CORRECT: futureValue stores the monthly SIP input for this request type
+        userRequest.setTimePeriodYears(requestDto.getTimePeriodYears());
+        userRequest.setDreamType(requestDto.getDreamType() != null ? requestDto.getDreamType() : "Custom SIP What-If");
+        userRequest.setOriginalTargetFutureValue(requestDto.getOriginalTargetFutureValue()); // CORRECT: Store the original target FV here
         userRequest = userRequestRepository.save(userRequest);
 
         LambdaSipResponse sipResponse = getOrCreateSipCalculationFromUserRequests(
-                "calculate_fv_from_sip", originalTargetFutureValue, timePeriodYears, monthlySipAmount);
+                "calculate_fv_from_sip", requestDto.getOriginalTargetFutureValue(), requestDto.getTimePeriodYears(), requestDto.getMonthlySipAmount());
 
         GoalCalculation goalCalculation = new GoalCalculation();
         goalCalculation.setRequestId(userRequest.getId());
@@ -113,16 +104,19 @@ public class UserRequestService {
         return goalCalculationRepository.findByRequestId(requestId);
     }
 
-    /** Helper method to retrieve SIP/FV calculation results from existing user requests (as cache) or call Lambda. */
+    /**
+     * Helper method to retrieve SIP/FV calculation results from existing user requests (as cache) or call Lambda.
+     * It now uses the correct `futureValue` for `calculate_sip_from_fv` and `monthlySipAmount` for `calculate_fv_from_sip` as cache keys.
+     */
     private LambdaSipResponse getOrCreateSipCalculationFromUserRequests(String operation, BigDecimal futureValue, Integer timePeriodYears, BigDecimal monthlySipAmount) {
         LambdaSipResponse sipResponse = null;
         String lambdaResponseJson = null;
 
         BigDecimal cacheKeyAmount = null;
         if ("calculate_sip_from_fv".equals(operation)) {
-            cacheKeyAmount = futureValue;
+            cacheKeyAmount = futureValue; // Cache key is the target FV
         } else if ("calculate_fv_from_sip".equals(operation)) {
-            cacheKeyAmount = monthlySipAmount;
+            cacheKeyAmount = monthlySipAmount; // Cache key is the monthly SIP input
         } else {
             logger.severe("Attempted to cache for an unknown operation: " + operation + ". Calling Lambda directly.");
             return sipCalculationService.performLambdaCalculation(operation, timePeriodYears, futureValue, monthlySipAmount);
@@ -156,6 +150,7 @@ public class UserRequestService {
 
         if (sipResponse == null) {
             logger.info("SIP calculation not found in user_requests cache. Calling AWS Lambda for operation " + operation + " for amount: " + cacheKeyAmount + ", Years: " + timePeriodYears);
+            // Pass futureValue (original target) and monthlySipAmount (user's input) to Lambda
             sipResponse = sipCalculationService.performLambdaCalculation(operation, timePeriodYears, futureValue, monthlySipAmount);
         }
         return sipResponse;

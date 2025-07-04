@@ -37,9 +37,13 @@ public class PdfGeneratorService {
     private static final Logger logger = Logger.getLogger(PdfGeneratorService.class.getName());
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Define the FinSaathi blue color (from the image, looks like RGB 0, 102, 204)
     private static final DeviceRgb FINSAATHI_BLUE = new DeviceRgb(0, 102, 204);
-    private static final DeviceRgb LIGHT_GREY = new DeviceRgb(240, 240, 240); // For table headers
+    private static final DeviceRgb LIGHT_GREY = new DeviceRgb(240, 240, 240);
+
+    private static final float FONT_SIZE_HEADING = 24f;
+    private static final float FONT_SIZE_SUBHEADING = 14f;
+    private static final float FONT_SIZE_CONTENT = 10f;
+    private static final float FONT_SIZE_SMALL_NOTE = 10f;
 
     /**
      * Generates a PDF report summarizing a user's request, associated calculation, and allocated scheme suggestions.
@@ -57,7 +61,7 @@ public class PdfGeneratorService {
         PdfDocument pdf = new PdfDocument(writer);
         Document document = new Document(pdf);
 
-        document.setMargins(50, 50, 50, 50);
+        document.setMargins(50, 50, 50, 50); // Keep page margins
 
         DecimalFormat currencyFormat = new DecimalFormat("'Rs.' #,##0");
         DecimalFormat percentageFormat = new DecimalFormat("#,##0.0'%'");
@@ -65,7 +69,6 @@ public class PdfGeneratorService {
         // --- Header Section (with Logo and Title) ---
         Table headerTable = new Table(UnitValue.createPercentArray(new float[]{1, 5})).setWidth(UnitValue.createPercentValue(100));
 
-        // Add Logo
         try {
             String logoImageUrl = "https://my-finsaathi-public-assets.s3.ap-south-1.amazonaws.com/FinSaathi+Logo+Updated.png"; // REMEMBER TO UPDATE THIS URL
             Image logo = new Image(ImageDataFactory.create(logoImageUrl));
@@ -78,30 +81,30 @@ public class PdfGeneratorService {
         }
 
         headerTable.addCell(new Cell().add(new Paragraph("FinSaathi Goal Planning Report")
-                        .setFontSize(24)
-                        .setTextAlignment(TextAlignment.LEFT) // Adjusted to left-align with image, as per image
+                        .setFontSize(FONT_SIZE_HEADING)
+                        .setTextAlignment(TextAlignment.LEFT)
                         .setBold()
                         .setFontColor(FINSAATHI_BLUE))
                 .setBorder(Border.NO_BORDER));
-        document.add(headerTable.setMarginBottom(5));
+        document.add(headerTable.setMarginBottom(5)); // Reduced margin
 
         Table underlineTable = new Table(UnitValue.createPercentArray(1)).setWidth(UnitValue.createPercentValue(100));
         underlineTable.addCell(new Cell().setBorder(Border.NO_BORDER).setBorderBottom(new SolidBorder(FINSAATHI_BLUE, 2)).setHeight(2));
-        document.add(underlineTable.setMarginBottom(20));
+        document.add(underlineTable.setMarginBottom(10)); // Reduced margin
 
         document.add(new Paragraph("(Prepared for: " + user.getName() + ")")
-                .setFontSize(12)
-                .setMarginBottom(5));
+                .setFontSize(FONT_SIZE_CONTENT)
+                .setMarginBottom(2)); // Reduced margin
         document.add(new Paragraph("Date: " + LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MM-yyyy")))
-                .setFontSize(12)
-                .setMarginBottom(30)); // Increased margin for section separation
+                .setFontSize(FONT_SIZE_CONTENT)
+                .setMarginBottom(15)); // Reduced margin
 
         // --- Goal Summary Section ---
         document.add(new Paragraph("Goal Summary")
-                .setFontSize(18)
+                .setFontSize(FONT_SIZE_SUBHEADING)
                 .setBold()
                 .setFontColor(FINSAATHI_BLUE)
-                .setMarginBottom(10));
+                .setMarginBottom(5)); // Reduced margin
 
         Table goalSummaryTable = new Table(UnitValue.createPercentArray(new float[]{1, 2})).setWidth(UnitValue.createPercentValue(60));
         goalSummaryTable.addCell(createGoalSummaryLabelCell("Goal Type:"));
@@ -129,14 +132,14 @@ public class PdfGeneratorService {
         goalSummaryTable.addCell(createGoalSummaryLabelCell("Investment Type:"));
         goalSummaryTable.addCell(createGoalSummaryValueCell("Diversified"));
 
-        document.add(goalSummaryTable.setMarginBottom(30));
+        document.add(goalSummaryTable.setMarginBottom(15)); // Reduced margin
 
         // --- Projection Summary Section ---
         document.add(new Paragraph("Projection Summary")
-                .setFontSize(18)
+                .setFontSize(FONT_SIZE_SUBHEADING)
                 .setBold()
                 .setFontColor(FINSAATHI_BLUE)
-                .setMarginBottom(10));
+                .setMarginBottom(5)); // Reduced margin
 
         Table projectionTable = new Table(UnitValue.createPercentArray(new float[]{2, 1, 2})).setWidth(UnitValue.createPercentValue(100));
         projectionTable.addHeaderCell(createHeaderCell("Investment Type"));
@@ -165,7 +168,7 @@ public class PdfGeneratorService {
                     .findFirst();
             mfSuggestion.ifPresent(s -> {
                 BigDecimal expectedValue = calculateFVFromSIP(s.getMonthlySipRequiredForGoal(), userRequest.getTimePeriodYears() * 12, s.getAnnualRate().doubleValue());
-                projectionTable.addCell(createDataCell(s.getProductType() + " (SIP)")); // Match image "Mutual Funds (SIP)"
+                projectionTable.addCell(createDataCell("Mutual Funds (SIP)"));
                 projectionTable.addCell(createDataCell(percentageFormat.format(s.getAnnualRate().multiply(new BigDecimal("100")))));
                 projectionTable.addCell(createDataCell(currencyFormat.format(expectedValue)));
             });
@@ -175,7 +178,7 @@ public class PdfGeneratorService {
                     .findFirst();
             bankSuggestion.ifPresent(s -> {
                 BigDecimal expectedValue = calculateFVFromSIP(s.getMonthlySipRequiredForGoal(), userRequest.getTimePeriodYears() * 12, s.getAnnualRate().doubleValue());
-                projectionTable.addCell(createDataCell("Bank Fixed Deposit")); // Match image "Bank Fixed Deposit"
+                projectionTable.addCell(createDataCell("Bank Fixed Deposit"));
                 projectionTable.addCell(createDataCell(percentageFormat.format(s.getAnnualRate().multiply(new BigDecimal("100")))));
                 projectionTable.addCell(createDataCell(currencyFormat.format(expectedValue)));
             });
@@ -185,7 +188,7 @@ public class PdfGeneratorService {
                     .findFirst();
             equityGoldSuggestion.ifPresent(s -> {
                 BigDecimal expectedValue = calculateFVFromSIP(s.getMonthlySipRequiredForGoal(), userRequest.getTimePeriodYears() * 12, s.getAnnualRate().doubleValue());
-                projectionTable.addCell(createDataCell("Equity Shares")); // Match image "Equity Shares"
+                projectionTable.addCell(createDataCell("Equity Shares"));
                 projectionTable.addCell(createDataCell(percentageFormat.format(s.getAnnualRate().multiply(new BigDecimal("100")))));
                 projectionTable.addCell(createDataCell(currencyFormat.format(expectedValue)));
             });
@@ -205,15 +208,17 @@ public class PdfGeneratorService {
                 projectionTable.addCell(createDataCell("Blended Portfolio"));
                 projectionTable.addCell(createDataCell("N/A"));
                 projectionTable.addCell(createDataCell("N/A"));
+                Table emptyRowTable = new Table(UnitValue.createPercentArray(new float[]{1})).setWidth(UnitValue.createPercentValue(100));
+                emptyRowTable.addCell(new Cell().add(new Paragraph("")).setBorder(Border.NO_BORDER).setHeight(10)); // Small empty row
+                document.add(emptyRowTable);
             }
         } else {
-            // Placeholder rows if no valid monthly investment for projection
             projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A"));
             projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A"));
             projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A")); projectionTable.addCell(createDataCell("N/A"));
         }
 
-        document.add(projectionTable.setMarginBottom(10));
+        document.add(projectionTable.setMarginBottom(10)); // Reduced margin
 
         BigDecimal shortfall = BigDecimal.ZERO;
         if (userOriginalTargetFV != null && actualFVFromUserSIP != null) {
@@ -226,20 +231,20 @@ public class PdfGeneratorService {
         }
 
         document.add(new Paragraph("Shortfall to Goal: " + currencyFormat.format(shortfall))
-                .setFontSize(12)
+                .setFontSize(FONT_SIZE_CONTENT)
                 .setBold()
-                .setMarginBottom(5));
+                .setMarginBottom(5)); // Reduced margin
         document.add(new Paragraph("* Projections are indicative and based on input data. Actual outcomes may vary with market conditions.")
-                .setFontSize(10)
-                .setMarginBottom(30));
+                .setFontSize(FONT_SIZE_SMALL_NOTE)
+                .setMarginBottom(15)); // Reduced margin
 
 
         // --- Recommendations Section ---
         document.add(new Paragraph("Recommendations")
-                .setFontSize(18)
+                .setFontSize(FONT_SIZE_SUBHEADING)
                 .setBold()
                 .setFontColor(FINSAATHI_BLUE)
-                .setMarginBottom(10));
+                .setMarginBottom(5)); // Reduced margin
 
         if (userOriginalTargetFV != null && actualFVFromUserSIP != null && actualFVFromUserSIP.compareTo(userOriginalTargetFV) < 0) {
             BigDecimal requiredSipToHitTarget = calculateSIPFromFV(
@@ -248,16 +253,16 @@ public class PdfGeneratorService {
                     blendedRate != null ? blendedRate.doubleValue() : 0.0
             );
             document.add(new Paragraph("- Increase investment to " + currencyFormat.format(requiredSipToHitTarget) + "/month for goal completion.")
-                    .setFontSize(12)
-                    .setMarginBottom(5));
+                    .setFontSize(FONT_SIZE_CONTENT)
+                    .setMarginBottom(2)); // Reduced margin
         } else if (userOriginalTargetFV != null && actualFVFromUserSIP != null && actualFVFromUserSIP.compareTo(userOriginalTargetFV) >= 0) {
             document.add(new Paragraph("- Congratulations! Your current monthly investment is projected to meet or exceed your target goal.")
-                    .setFontSize(12)
-                    .setMarginBottom(5));
+                    .setFontSize(FONT_SIZE_CONTENT)
+                    .setMarginBottom(2)); // Reduced margin
         } else {
             document.add(new Paragraph("- Review your current investment plan to ensure it aligns with your goals.")
-                    .setFontSize(12)
-                    .setMarginBottom(5));
+                    .setFontSize(FONT_SIZE_CONTENT)
+                    .setMarginBottom(2)); // Reduced margin
         }
 
         if (userOriginalTargetFV != null && monthlyInvestmentForSummary != null && monthlyInvestmentForSummary.compareTo(BigDecimal.ZERO) > 0 && blendedRate != null && actualFVFromUserSIP != null && actualFVFromUserSIP.compareTo(userOriginalTargetFV) < 0) {
@@ -272,42 +277,41 @@ public class PdfGeneratorService {
             if (additionalMonths > currentMonths) {
                 int additionalYears = (int) Math.ceil((double)(additionalMonths - currentMonths) / 12.0);
                 document.add(new Paragraph("- Alternatively, extend your timeline by approximately " + additionalYears + " more years at the current monthly investment rate to achieve your goal.")
-                        .setFontSize(12)
-                        .setMarginBottom(30));
+                        .setFontSize(FONT_SIZE_CONTENT)
+                        .setMarginBottom(15)); // Reduced margin
             } else {
                 document.add(new Paragraph("- Your current monthly investment is projected to meet your goal within the specified timeline.")
-                        .setFontSize(12)
-                        .setMarginBottom(30));
+                        .setFontSize(FONT_SIZE_CONTENT)
+                        .setMarginBottom(15)); // Reduced margin
             }
         } else {
             document.add(new Paragraph("- Consider adjusting your investment strategy or timeline for optimal results.")
-                    .setFontSize(12)
-                    .setMarginBottom(30));
+                    .setFontSize(FONT_SIZE_CONTENT)
+                    .setMarginBottom(15)); // Reduced margin
         }
 
 
         // --- Disclaimer Section ---
         document.add(new Paragraph("Disclaimer")
-                .setFontSize(18)
+                .setFontSize(FONT_SIZE_SUBHEADING)
                 .setBold()
                 .setFontColor(FINSAATHI_BLUE)
-                .setMarginBottom(10));
+                .setMarginBottom(5)); // Reduced margin
         document.add(new Paragraph("“FinSaathi (A brand of Santhani financial Services) is a registered distributor of mutual funds, insurance products, and government saving schemes. All projections are based on historical market performance and may vary due to market volatility. Please consult the founder of FinSaathi for further details.")
-                .setFontSize(10)
-                .setMarginBottom(30));
+                .setFontSize(FONT_SIZE_SMALL_NOTE)
+                .setMarginBottom(15)); // Reduced margin
 
         // --- Footer Section ---
         document.add(new Paragraph("Founder Name: Dr B Sekar")
-                .setFontSize(10)
-                .setMarginBottom(5));
-        // Corrected: Use Link element for clickable email
-        document.add(new Paragraph().add(new Text("Email ID: ").setFontSize(10))
+                .setFontSize(FONT_SIZE_SMALL_NOTE)
+                .setMarginBottom(2)); // Reduced margin
+        document.add(new Paragraph().add(new Text("Email ID: ").setFontSize(FONT_SIZE_SMALL_NOTE))
                 .add(new Link("santhanifinancials@gmail.com", PdfAction.createURI("mailto:santhanifinancials@gmail.com")))
-                .setFontSize(10)
-                .setMarginBottom(5));
+                .setFontSize(FONT_SIZE_SMALL_NOTE)
+                .setMarginBottom(2)); // Reduced margin
         document.add(new Paragraph("Social Media: @santhaniFinancialservices")
-                .setFontSize(10)
-                .setMarginBottom(5));
+                .setFontSize(FONT_SIZE_SMALL_NOTE)
+                .setMarginBottom(5)); // Reduced margin
 
 
         document.close();
@@ -316,29 +320,31 @@ public class PdfGeneratorService {
 
     /** Helper to create a styled header cell for tables. */
     private Cell createHeaderCell(String content) {
-        return new Cell().add(new Paragraph(content).setBold())
-                .setBackgroundColor(LIGHT_GREY) // Use defined light grey color
+        return new Cell().add(new Paragraph(content).setBold().setFontSize(FONT_SIZE_CONTENT))
+                .setBackgroundColor(LIGHT_GREY)
                 .setBorder(new SolidBorder(DeviceRgb.BLACK, 0.5f))
-                .setTextAlignment(TextAlignment.CENTER);
+                .setTextAlignment(TextAlignment.LEFT);
     }
 
     /** Helper to create a styled data cell for tables. */
     private Cell createDataCell(String content) {
-        return new Cell().add(new Paragraph(content))
+        return new Cell().add(new Paragraph(content).setFontSize(FONT_SIZE_CONTENT))
                 .setBorder(new SolidBorder(DeviceRgb.BLACK, 0.5f))
-                .setTextAlignment(TextAlignment.CENTER);
+                .setTextAlignment(TextAlignment.LEFT);
     }
 
     /** Helper to create a styled label cell for Goal Summary table. */
     private Cell createGoalSummaryLabelCell(String content) {
-        return new Cell().add(new Paragraph(content).setBold().setFontSize(12)) // Bold, smaller font
-                .setBorder(Border.NO_BORDER);
+        return new Cell().add(new Paragraph(content).setBold().setFontSize(FONT_SIZE_CONTENT)) // Content font size
+                .setBorder(Border.NO_BORDER)
+                .setTextAlignment(TextAlignment.LEFT);
     }
 
     /** Helper to create a styled value cell for Goal Summary table. */
     private Cell createGoalSummaryValueCell(String content) {
-        return new Cell().add(new Paragraph(content).setFontSize(12)) // Regular font, smaller size
-                .setBorder(Border.NO_BORDER);
+        return new Cell().add(new Paragraph(content).setFontSize(FONT_SIZE_CONTENT)) // Content font size
+                .setBorder(Border.NO_BORDER)
+                .setTextAlignment(TextAlignment.LEFT);
     }
 
     /** Helper method to format a BigDecimal amount into a currency string. */
