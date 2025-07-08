@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/reports") // Base path for report-related endpoints
+@RequestMapping("/api/reports")
 public class ReportController {
 
     private static final Logger logger = Logger.getLogger(ReportController.class.getName());
@@ -37,12 +37,6 @@ public class ReportController {
     @Autowired
     private EmailService emailService;
 
-    /**
-     * Generates a PDF report for a specific user request (transaction) and returns it as a download.
-     * Maps to GET /api/reports/pdf/{requestId}
-     * @param requestId The ID of the user request (Transaction ID) for which to generate the report.
-     * @return ResponseEntity with the PDF bytes for download or an error status.
-     */
     @GetMapping(value = "/pdf/{requestId}", produces = MediaType.APPLICATION_PDF_VALUE)
     public ResponseEntity<byte[]> getPdfReport(@PathVariable UUID requestId) {
         logger.info("Received request to generate PDF for request ID: " + requestId);
@@ -68,7 +62,6 @@ public class ReportController {
         }
         User user = userOptional.get();
 
-        // Determine the overall optimal monthly SIP needed for the allocation breakdown in the PDF
         BigDecimal overallOptimalMonthlySip;
         if (goalCalculation.getMonthlySipRequiredBestWeightedCase() != null) {
             overallOptimalMonthlySip = goalCalculation.getMonthlySipRequiredBestWeightedCase();
@@ -86,10 +79,9 @@ public class ReportController {
         );
 
         try {
-            // Generate the PDF
+
             byte[] pdfBytes = pdfGeneratorService.generatePdfReport(user, userRequest, goalCalculation, allocatedSuggestions);
 
-            // Set HTTP Headers for PDF download
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_PDF);
             String filename = "SIP_Report_" + user.getName().replaceAll("\\s+", "_") + "_Request_" + requestId.toString().substring(0, 8) + ".pdf";
@@ -106,19 +98,11 @@ public class ReportController {
         }
     }
 
-    /**
-     * Generates a PDF report and emails it to the user associated with the request.
-     * Maps to POST /api/reports/email/{requestId}
-     * @param requestId The ID of the user request (Transaction ID).
-     * @param payload A map that MUST contain an "email" field.
-     * @return ResponseEntity with success/failure message.
-     */
     @PostMapping("/email/{requestId}")
     public ResponseEntity<Map<String, String>> emailPdfReport(@PathVariable UUID requestId,
                                                               @RequestBody Map<String, String> payload) {
         logger.info("Received request to email PDF for request ID: " + requestId);
 
-        // Validate email from payload immediately
         String recipientEmail = payload.get("email");
         if (recipientEmail == null || recipientEmail.isBlank() || !recipientEmail.contains("@") || !recipientEmail.contains(".")) {
             logger.warning("Invalid email address provided in request body for request ID: " + requestId);
@@ -148,14 +132,11 @@ public class ReportController {
         }
         User user = userOptional.get();
 
-        // --- NEW LOGIC: Save the provided email to the user's profile ---
         if (!recipientEmail.equals(user.getEmail())) { // Only update if different
             userService.updateUserEmail(user.getId(), recipientEmail);
             logger.info("Updated user " + user.getId() + " email to: " + recipientEmail);
         }
-        // --- END NEW LOGIC ---
 
-        // Determine the overall optimal monthly SIP needed for the allocation breakdown in the PDF email
         BigDecimal overallOptimalMonthlySip;
         if (goalCalculation.getMonthlySipRequiredBestWeightedCase() != null) {
             overallOptimalMonthlySip = goalCalculation.getMonthlySipRequiredBestWeightedCase();
@@ -172,7 +153,6 @@ public class ReportController {
         );
 
         try {
-            // Generate PDF bytes
             byte[] pdfBytes = pdfGeneratorService.generatePdfReport(user, userRequest, goalCalculation, allocatedSuggestions);
             String filename = "SIP_Report_" + user.getName().replaceAll("\\s+", "_") + "_Request_" + requestId.toString().substring(0, 8) + ".pdf";
             String subject = "Your SIP Goal Tracking Report - Request ID: " + requestId.toString().substring(0, 8);
@@ -180,7 +160,6 @@ public class ReportController {
                     "Please find attached your SIP Goal Tracking Report for your dream of " + userRequest.getDreamType() + "." +
                     "<br><br>Thank you for using our service!";
 
-            // Send the email with the PDF attachment
             emailService.sendEmailWithAttachment(recipientEmail, subject, body, pdfBytes, filename);
 
             logger.info("PDF report emailed successfully for request ID: " + requestId + " to " + recipientEmail);

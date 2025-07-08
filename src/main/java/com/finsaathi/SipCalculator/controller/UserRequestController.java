@@ -27,7 +27,6 @@ public class UserRequestController {
     @Autowired
     private InvestmentSchemeService investmentSchemeService;
 
-    /** Primary flow: Creates a new user request for a goal calculation (SIP from FV). */
     @PostMapping("/calculate-and-save")
     public ResponseEntity<?> createAndSaveUserRequest(@RequestBody CalculateAndSaveRequest request) {
         logger.info("Received request to create and save user request (SIP from FV): " + request.toString());
@@ -51,7 +50,6 @@ public class UserRequestController {
         }
 
         try {
-            // Service method now accepts the DTO directly
             UserRequest savedUserRequest = userRequestService.createNewUserRequestAndCalculateSip(request);
             Optional<GoalCalculation> goalCalculation = userRequestService.getGoalCalculationByRequestId(savedUserRequest.getId());
 
@@ -72,24 +70,14 @@ public class UserRequestController {
         }
     }
 
-    /**
-     * Calculates Future Value from a user-provided Monthly SIP amount.
-     * Now accepts input as a JSON request body.
-     * Maps to POST /api/requests/calculate-fv-from-sip
-     * @param request The CalculateFvFromSipRequest DTO containing all input parameters.
-     * @return ResponseEntity with the new UserRequest and its associated GoalCalculation containing FV.
-     */
     @PostMapping("/calculate-fv-from-sip")
     public ResponseEntity<?> calculateFvFromUserSip(@RequestBody CalculateFvFromSipRequest request) { // Accepts DTO directly
         logger.info("Received request to calculate FV from SIP: " + request.toString());
 
-        // Extract fields from DTO for validation
         UUID userId = request.getUserId();
         BigDecimal monthlySipAmount = request.getMonthlySipAmount();
         Integer timePeriodYears = request.getTimePeriodYears();
-        // dreamType and originalTargetFutureValue are optional and can be null
 
-        // Basic input validation
         if (userId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "User ID cannot be empty."));
         }
@@ -101,7 +89,7 @@ public class UserRequestController {
         }
 
         try {
-            // FIX APPLIED HERE: Pass the whole request DTO to the service method
+
             UserRequest savedUserRequest = userRequestService.createFutureValueCalculationForUserSip(request);
             Optional<GoalCalculation> goalCalculation = userRequestService.getGoalCalculationByRequestId(savedUserRequest.getId());
 
@@ -122,7 +110,6 @@ public class UserRequestController {
         }
     }
 
-    /** Retrieves all user requests (transactions) for a specific user. */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<UserRequest>> getUserRequestsByUserId(@PathVariable UUID userId) {
         logger.info("Received request to get all user requests for user ID: " + userId);
@@ -130,7 +117,6 @@ public class UserRequestController {
         return ResponseEntity.ok(userRequests);
     }
 
-    /** Retrieves details of a specific user request (transaction) and its associated calculation results. */
     @GetMapping("/{requestId}")
     public ResponseEntity<?> getUserRequestDetails(@PathVariable UUID requestId) {
         logger.info("Received request to get details for request ID: " + requestId);
@@ -152,7 +138,6 @@ public class UserRequestController {
         return ResponseEntity.ok(response);
     }
 
-    /** Retrieves detailed scheme suggestions for a specific user request. */
     @GetMapping("/{requestId}/scheme-suggestions")
     public ResponseEntity<?> getSchemeSuggestionsForRequest(@PathVariable UUID requestId) {
         logger.info("Received request to get scheme suggestions for request ID: " + requestId);
